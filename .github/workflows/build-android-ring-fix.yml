@@ -1,0 +1,157 @@
+name: Build Android APK Ring Fix
+
+on:
+  push:
+    branches: [ main, android-fix, ring-fix ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RING_PREGENERATE_ASM: 1
+
+jobs:
+  build-android-ring-fix:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-linux-android
+            rust-version: 1.77.2
+            ndk-version: 25.2.9519653
+          - target: armv7-linux-androideabi
+            rust-version: 1.77.2
+            ndk-version: 25.2.9519653
+          - target: x86_64-linux-android
+            rust-version: 1.77.2
+            ndk-version: 25.2.9519653
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install Rust with specific version
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ matrix.rust-version }}
+        targets: ${{ matrix.target }}
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        api-level: 33
+        ndk: ${{ matrix.ndk-version }}
+        cmake: 3.22.1
+        
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config libssl-dev
+        
+    - name: Install dependencies
+      run: |
+        npm install
+        
+    - name: Setup Cargo config for Android (Ring Fix)
+      run: |
+        mkdir -p .cargo
+        cat > .cargo/config.toml << EOF
+        [target.aarch64-linux-android]
+        linker = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+        rustflags = ["-C", "link-arg=-Wl,--allow-multiple-definition"]
+        
+        [target.armv7-linux-androideabi]
+        linker = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang"
+        rustflags = ["-C", "link-arg=-Wl,--allow-multiple-definition"]
+        
+        [target.x86_64-linux-android]
+        linker = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang"
+        rustflags = ["-C", "link-arg=-Wl,--allow-multiple-definition"]
+        
+        [target.i686-linux-android]
+        linker = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang"
+        rustflags = ["-C", "link-arg=-Wl,--allow-multiple-definition"]
+        EOF
+        
+    - name: Pre-build ring crate
+      run: |
+        echo "Pre-building ring crate for ${{ matrix.target }}"
+        cargo fetch
+        cd ~/.cargo/registry/src/index.crates.io-*/ring-*/
+        cargo build --target ${{ matrix.target }} --release
+        
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ matrix.rust-version }}-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ matrix.rust-version }}-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-${{ matrix.target }}-${{ matrix.rust-version }}-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Install Tauri CLI
+      run: cargo install tauri-cli --version ^2.0.0
+      
+    - name: Initialize Tauri Android project
+      run: |
+        cd src-tauri
+        cargo tauri android init
+        
+    - name: Build Android APK (Debug) with Ring Fix
+      run: |
+        cd src-tauri
+        RING_PREGENERATE_ASM=1 cargo tauri android build --apk --debug
+        
+    - name: Build Android APK (Release) with Ring Fix
+      run: |
+        cd src-tauri
+        RING_PREGENERATE_ASM=1 cargo tauri android build --apk --release
+      continue-on-error: true
+      
+    - name: Upload APK artifacts
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: android-apk-ring-fix-${{ matrix.target }}-${{ matrix.rust-version }}
+        path: |
+          src-tauri/gen/android/app/build/outputs/apk/debug/
+          src-tauri/gen/android/app/build/outputs/apk/release/
+        retention-days: 30
+        
+    - name: Upload build logs
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: build-logs-${{ matrix.target }}-${{ matrix.rust-version }}
+        path: |
+          src-tauri/target/release/build/*/out/
+          src-tauri/target/debug/build/*/out/
+        retention-days: 7
+        
+    - name: Security audit
+      run: cargo audit
+      continue-on-error: true
