@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edge Hive - ZKS Protocol</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            font-size: 3em;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        .status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-size: 1.2em;
+        }
+        .p2p-status {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            margin: 30px 0;
+        }
+        .p2p-item {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px;
+            min-width: 150px;
+        }
+        .peer-count {
+            font-size: 2em;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        button {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            color: white;
+            font-size: 1.1em;
+            cursor: pointer;
+            margin: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+        .log {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🐝 Edge Hive</h1>
+        <p>ZKS Protocol P2P Communication Platform</p>
+        
+        <div class="status">
+            <div>Connection Status: <span id="connection-status">Connecting...</span></div>
+            <div>Network: <span id="network-status">Initializing...</span></div>
+        </div>
+        
+        <div class="p2p-status">
+            <div class="p2p-item">
+                <div>Active Peers</div>
+                <div class="peer-count" id="peer-count">0</div>
+            </div>
+            <div class="p2p-item">
+                <div>Messages Sent</div>
+                <div class="peer-count" id="messages-sent">0</div>
+            </div>
+            <div class="p2p-item">
+                <div>Network Type</div>
+                <div id="network-type">libp2p</div>
+            </div>
+        </div>
+        
+        <div>
+            <button onclick="connectP2P()">🔗 Connect to Network</button>
+            <button onclick="discoverPeers()">🔍 Discover Peers</button>
+            <button onclick="sendMessage()">📤 Send Test Message</button>
+            <button onclick="clearLog()">🗑️ Clear Log</button>
+        </div>
+        
+        <div class="log" id="log">
+            <div>Edge Hive initialized...</div>
+            <div>Waiting for Tauri backend connection...</div>
+        </div>
+    </div>
+
+    <script>
+        let peerCount = 0;
+        let messagesSent = 0;
+        let isConnected = false;
+
+        // Initialize Tauri API when available
+        if (window.__TAURI_IPC__) {
+            initializeTauri();
+        } else {
+            addLog('Tauri not available - running in web mode');
+            document.getElementById('connection-status').textContent = 'Web Mode';
+            document.getElementById('network-status').textContent = 'Simulated';
+        }
+
+        function initializeTauri() {
+            try {
+                // Import Tauri APIs
+                import('@tauri-apps/api/core').then(({ invoke }) => {
+                    window.__TAURI_INVOKE__ = invoke;
+                    addLog('Tauri API loaded successfully');
+                    
+                    // Test connection to Rust backend
+                    testConnection();
+                }).catch(error => {
+                    addLog('Failed to load Tauri API: ' + error.message);
+                });
+            } catch (error) {
+                addLog('Tauri initialization error: ' + error.message);
+            }
+        }
+
+        async function testConnection() {
+            try {
+                if (window.__TAURI_INVOKE__) {
+                    const result = await window.__TAURI_INVOKE__('test_connection');
+                    addLog('Backend connection: ' + result);
+                    document.getElementById('connection-status').textContent = 'Connected';
+                    isConnected = true;
+                }
+            } catch (error) {
+                addLog('Connection test failed: ' + error.message);
+                document.getElementById('connection-status').textContent = 'Failed';
+            }
+        }
+
+        async function connectP2P() {
+            addLog('Attempting to connect to P2P network...');
+            
+            try {
+                if (window.__TAURI_INVOKE__) {
+                    const result = await window.__TAURI_INVOKE__('connect_p2p');
+                    addLog('P2P Connection result: ' + result);
+                    document.getElementById('network-status').textContent = 'Connected';
+                    
+                    // Start peer discovery
+                    setTimeout(discoverPeers, 2000);
+                } else {
+                    // Simulate connection for web mode
+                    setTimeout(() => {
+                        peerCount = Math.floor(Math.random() * 5) + 1;
+                        document.getElementById('peer-count').textContent = peerCount;
+                        document.getElementById('network-status').textContent = 'Connected';
+                        addLog('Simulated P2P connection established');
+                        addLog('Found ' + peerCount + ' peers in simulation');
+                    }, 1500);
+                }
+            } catch (error) {
+                addLog('P2P connection failed: ' + error.message);
+                document.getElementById('network-status').textContent = 'Connection Failed';
+            }
+        }
+
+        async function discoverPeers() {
+            addLog('Discovering peers...');
+            
+            try {
+                if (window.__TAURI_INVOKE__) {
+                    const peers = await window.__TAURI_INVOKE__('discover_peers');
+                    peerCount = peers.length;
+                    document.getElementById('peer-count').textContent = peerCount;
+                    addLog('Discovered ' + peerCount + ' peers: ' + JSON.stringify(peers));
+                } else {
+                    // Simulate peer discovery
+                    peerCount = Math.floor(Math.random() * 8) + 2;
+                    document.getElementById('peer-count').textContent = peerCount;
+                    addLog('Simulated discovery: Found ' + peerCount + ' peers');
+                }
+            } catch (error) {
+                addLog('Peer discovery failed: ' + error.message);
+            }
+        }
+
+        async function sendMessage() {
+            messagesSent++;
+            document.getElementById('messages-sent').textContent = messagesSent;
+            
+            addLog('Sending test message #' + messagesSent + '...');
+            
+            try {
+                if (window.__TAURI_INVOKE__) {
+                    const result = await window.__TAURI_INVOKE__('send_message', { 
+                        content: 'Test message #' + messagesSent,
+                        timestamp: new Date().toISOString()
+                    });
+                    addLog('Message sent: ' + result);
+                } else {
+                    // Simulate message sending
+                    setTimeout(() => {
+                        addLog('Simulated message #' + messagesSent + ' sent successfully');
+                    }, 800);
+                }
+            } catch (error) {
+                addLog('Message sending failed: ' + error.message);
+            }
+        }
+
+        function addLog(message) {
+            const log = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            log.appendChild(logEntry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '<div>Log cleared...</div>';
+        }
+
+        // Auto-discover peers every 30 seconds if connected
+        setInterval(() => {
+            if (isConnected || document.getElementById('network-status').textContent === 'Connected') {
+                discoverPeers();
+            }
+        }, 30000);
+
+        // Initial connection attempt
+        setTimeout(() => {
+            if (window.__TAURI_IPC__) {
+                connectP2P();
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
