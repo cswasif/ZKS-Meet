@@ -1,0 +1,15 @@
+{
+  "name": "edge-hive",
+  "version": "0.1.0",
+  "description": "Edge Hive - ZKS Protocol Tauri Application",
+  "main": "index.html",
+  "scripts": {
+    "dev": "python -m http.server 3000",
+    "build": "echo 'Build complete'",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.9.1",
+    "@tauri-apps/cli": "^2.9.6"
+  }
+}
